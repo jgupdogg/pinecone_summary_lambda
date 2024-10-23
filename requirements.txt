@@ -1,0 +1,3 @@
+pinecone
+openai==0.28
+numpy

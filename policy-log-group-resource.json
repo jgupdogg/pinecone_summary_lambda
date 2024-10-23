@@ -1,0 +1,27 @@
+{
+    "Version": "2012-10-17",
+    "Statement": [
+      {
+        "Sid": "APIGatewayLogsToCloudWatchLogs",
+        "Effect": "Allow",
+        "Principal": {
+          "Service": "apigateway.amazonaws.com"
+        },
+        "Action": "logs:CreateLogGroup",
+        "Resource": "arn:aws:logs:us-east-1:183295431558:log-group:/aws/apigateway/GetSummariesAPI-AccessLogs:*"
+      },
+      {
+        "Sid": "APIGatewayLogsToCloudWatchLogs",
+        "Effect": "Allow",
+        "Principal": {
+          "Service": "apigateway.amazonaws.com"
+        },
+        "Action": [
+          "logs:PutLogEvents",
+          "logs:CreateLogStream"
+        ],
+        "Resource": "arn:aws:logs:us-east-1:183295431558:log-group:/aws/apigateway/GetSummariesAPI-AccessLogs:*"
+      }
+    ]
+  }
+  
