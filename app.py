@@ -232,6 +232,7 @@ def lambda_handler(event, context):
                 namespace="summaries",
                 vector=vector,
                 top_k=top_k,
+                include_metadata=True,
                 # filter=dynamic_filters  # Apply dynamic filters if necessary
             )
             
