@@ -4,15 +4,16 @@ import datetime
 import logging
 import base64
 import openai
+import asyncio
 
 from data_cleaning import clean_empty_arrays_and_objects
 from date_utils import generate_date_range, generate_recent_dates
 from vector_utils import is_valid_vector, create_dense_vector
-from db_utils import initialize_pinecone, get_source_info_from_snowflake
+from db_utils import initialize_pinecone, get_article_info_from_snowflake, create_snowflake_session
 
 # Configure logging
 logger = logging.getLogger()
-logger.setLevel(logging.INFO)
+logger.setLevel(logging.DEBUG)
 
 def lambda_handler(event, context):
     # Define CORS headers
@@ -48,6 +49,9 @@ def lambda_handler(event, context):
     try:
         # Initialize Pinecone and get the index
         pinecone_index = initialize_pinecone()
+        
+        # Create Snowflake session
+        snowflake_session = create_snowflake_session()
         
         # Set OpenAI API key
         openai_api_key = os.environ.get("OPENAI_API_KEY")
@@ -140,47 +144,64 @@ def lambda_handler(event, context):
             # Log the entire query_results for debugging
             logger.debug(f"Full query_results: {json.dumps(query_results, default=str)}")
             
-            # Extract all article_ids from the matches
-            source_ids = set()
+            article_ids_set = set()
             for match in query_results['matches']:
                 metadata = match.get('metadata', {})
                 article_ids_str = metadata.get('article_ids', '')
                 if article_ids_str:
                     # Split the comma-separated string and strip whitespace
-                    article_ids = [sid.strip() for sid in article_ids_str.split(',') if sid.strip()]
-                    source_ids.update(article_ids)
+                    article_ids = [aid.strip() for aid in article_ids_str.split(',') if aid.strip()]
+                    article_ids_set.update(article_ids)
                     logger.debug(f"Extracted article_ids: {article_ids}")
                 else:
                     logger.warning("No 'article_ids' found in match metadata.")
-            logger.info(f"Total unique article_ids extracted: {len(source_ids)}")
+            logger.info(f"Total unique article_ids extracted: {len(article_ids_set)}")
 
-            if not source_ids:
+            if not article_ids_set:
                 logger.warning("No article_ids found in any of the matches.")
             
             # Fetch site and url information from Snowflake
-            source_info = get_source_info_from_snowflake(source_ids) if source_ids else {}
-            logger.info(f"Fetched source info: {source_info}")
+            article_info = get_article_info_from_snowflake(article_ids_set, snowflake_session) if article_ids_set else {}
+            logger.info(f"Fetched article info: {article_info}")
 
-            # Convert QueryResponse to a serializable dictionary
+            # Convert QueryResponse to a serializable dictionary and modify 'article_ids' in metadata
             serializable_results = {
-                "matches": [
-                    {
-                        "id": match['id'],            # Accessed as a dict key
-                        "score": match['score'],      # Accessed as a dict key
-                        "metadata": match['metadata'] # Accessed as a dict key
-                    }
-                    for match in query_results['matches']
-                ],
+                "matches": [],
                 "namespace": query_results['namespace'],
             }
-            
-            # Include source_info in the response
+
+            for match in query_results['matches']:
+                match_id = match['id']
+                score = match['score']
+                metadata = match.get('metadata', {})
+                article_ids_str = metadata.get('article_ids', '')
+                if article_ids_str:
+                    article_ids = [aid.strip() for aid in article_ids_str.split(',') if aid.strip()]
+                    # Build a dict mapping article_id to its site and url
+                    articles_data = {}
+                    for aid in article_ids:
+                        if aid in article_info:
+                            articles_data[aid] = article_info[aid]
+                        else:
+                            articles_data[aid] = {'site': None, 'url': None}
+                    # Replace 'article_ids' in metadata with articles_data
+                    metadata['article_ids'] = articles_data
+                else:
+                    metadata['article_ids'] = {}
+
+                # Append the match to serializable_results
+                serializable_results['matches'].append({
+                    "id": match_id,
+                    "score": score,
+                    "metadata": metadata
+                })
+
+            # Prepare the response body
             response_body = {
-                "summaries": serializable_results,
-                "source_info": source_info
+                "summaries": serializable_results
             }
 
-            # Log the response body, ensuring it's serializable
+            # Log the response body
             logger.info(f"Response Body: {json.dumps(response_body)}")
 
         except Exception as e:
@@ -190,6 +211,13 @@ def lambda_handler(event, context):
                 'headers': cors_headers,
                 'body': json.dumps({'error': f"Error querying 'summaries' namespace: {str(e)}"})
             }
+        
+        # Close the Snowflake session
+        try:
+            snowflake_session.close()
+            logger.info("Snowflake session closed successfully.")
+        except Exception as e:
+            logger.error(f"Error closing Snowflake session: {str(e)}")
         
         return {
             'statusCode': 200,
