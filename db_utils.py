@@ -3,6 +3,7 @@ import logging
 from snowflake.snowpark import Session
 from pinecone import Pinecone
 from snowflake.snowpark.functions import col
+import requests
 
 
 logger = logging.getLogger()
@@ -123,194 +124,50 @@ def get_article_info_from_snowflake(article_ids, session: Session):
     except Exception as e:
         logger.error(f"Error fetching article info from Snowflake: {e}")
         return {}
-    try:
-        if isinstance(article_ids, (set, list)):
-            article_ids_list = [aid.strip() for aid in article_ids]
-        elif isinstance(article_ids, str):
-            article_ids_list = [aid.strip() for aid in article_ids.split(',') if aid.strip()]
-        else:
-            logger.error("article_ids must be a string, set, or list.")
-            return {}
-
-        # Convert IDs to uppercase if necessary
-        article_ids_list = [aid.upper() for aid in article_ids_list]
-
-        logger.info(f"Searching for article_ids: {article_ids_list}")
-        
-        # Construct the SQL query
-        placeholders = ', '.join([f"'{aid}'" for aid in article_ids_list])
-        query = f"""
-        SELECT ID, SITE, URL
-        FROM STOCK_NEWS
-        WHERE ID IN ({placeholders})
-        """
-        
-        logger.debug(f"Executing query: {query}")
-        
-        # Execute the query and fetch results
-        result = session.sql(query).collect()
-        logger.info(f"Fetched {len(result)} rows from Snowflake.")
-        
-        # Build the dictionary
-        article_info = {}
-        for row in result:
-            article_id = row['ID']
-            site = row['SITE']
-            url = row['URL']
-            article_info[article_id] = {'site': site, 'url': url}
-        
-        logger.info(f"Constructed article_info dictionary with {len(article_info)} entries.")
-        return article_info
-
-    except Exception as e:
-        logger.error(f"Error fetching article info from Snowflake: {e}")
-        return {}
-    """
-    Fetches site and URL information for the given article_ids from Snowflake without using pandas.
     
+
+def get_quote_info(symbols):
+    """
+    Fetches quote information for the given list of symbols from the Financial Modeling Prep API.
+
     Parameters:
-    - article_ids (str, set, or list): A set or list of article IDs.
-    - session (Session): An active Snowflake session.
-    
+    - symbols (list): A list of stock symbols.
+
     Returns:
-    - dict: A dictionary mapping each article_id to its corresponding site and URL.
+    - dict: A dictionary mapping each symbol to its quote data.
     """
     try:
-        # Ensure article_ids is a set or list
-        if isinstance(article_ids, (set, list)):
-            article_ids_list = list(article_ids)
-        elif isinstance(article_ids, str):
-            article_ids_list = [aid.strip() for aid in article_ids.split(',') if aid.strip()]
-        else:
-            logger.error("article_ids must be a string, set, or list.")
-            return {}
+        fmp_api_key = os.environ.get("FMP_API_KEY")
+        if not fmp_api_key:
+            logger.error("FMP_API_KEY is missing in environment variables.")
+            raise ValueError("Financial Modeling Prep API key is missing.")
 
-        logger.info(f"Searching for article_ids: {article_ids_list}")
-        
-        # Construct and execute the SQL query
-        placeholders = ', '.join(['%s'] * len(article_ids_list))
-        query = f"""
-        SELECT ID, SITE, URL
-        FROM STOCK_NEWS
-        WHERE ID IN ({placeholders})
-        """
-        
-        logger.debug(f"Executing query: {query}")
-        logger.debug(f"With parameters: {article_ids_list}")
-        
-        # Execute the query and fetch results
-        result = session.sql(query, params=article_ids_list).collect()
-        logger.info(f"Fetched {len(result)} rows from Snowflake.")
-        
-        # Build the dictionary
-        article_info = {}
-        for row in result:
-            article_id = row['ID']
-            site = row['SITE']
-            url = row['URL']
-            article_info[article_id] = {'site': site, 'url': url}
-        
-        logger.info(f"Constructed article_info dictionary with {len(article_info)} entries.")
-        return article_info
+        symbols_str = ",".join(symbols)
+        url = f"https://financialmodelingprep.com/api/v3/quote/{symbols_str}?apikey={fmp_api_key}"
+
+        logger.info(f"Fetching quote data from FMP API for symbols: {symbols_str}")
+        response = requests.get(url)
+        response.raise_for_status()  # Raises HTTPError for bad requests (4xx or 5xx)
+
+        data = response.json()
+        logger.debug(f"Received quote data: {data}")
+
+        # Build a dictionary mapping symbols to their quote data
+        quote_info = {}
+        for item in data:
+            symbol = item.get('symbol')
+            if symbol:
+                # Extract the required fields
+                quote_info[symbol] = {
+                    'price': item.get('price'),
+                    'changesPercentage': item.get('changesPercentage'),
+                    'marketCap': item.get('marketCap'),
+                    'volume': item.get('volume'),
+                    'exchange': item.get('exchange')
+                }
+        logger.info(f"Constructed quote_info dictionary with {len(quote_info)} entries.")
+        return quote_info
 
     except Exception as e:
-        logger.error(f"Error fetching article info from Snowflake: {e}")
-        return {}
-    """
-    Fetches site and URL information for the given article_ids from Snowflake without using pandas.
-    
-    Parameters:
-    - article_ids (str, set, or list): A set or list of article IDs.
-    - session (Session): An active Snowflake session.
-    
-    Returns:
-    - dict: A dictionary mapping each article_id to its corresponding site and URL.
-    """
-    try:
-        # Ensure article_ids is a set or list
-        if isinstance(article_ids, (set, list)):
-            article_ids_str = ", ".join([f"'{aid}'" for aid in article_ids])
-        elif isinstance(article_ids, str):
-            article_ids_str = ", ".join([f"'{aid.strip()}'" for aid in article_ids.split(',')])
-        else:
-            logger.error("article_ids must be a string, set, or list.")
-            return {}
-
-        logger.info(f"Searching for article_ids: {article_ids_str}")
-        
-        # Construct and execute the SQL query
-        query = f"""
-        SELECT ID, SITE, URL
-        FROM STOCK_NEWS
-        WHERE ID IN ({article_ids_str})
-        """
-        
-        logger.debug(f"Executing query: {query}")
-        
-        # Execute the query and fetch results
-        result = session.sql(query).collect()
-        logger.info(f"Fetched {len(result)} rows from Snowflake.")
-        
-        # Build the dictionary
-        article_info = {}
-        for row in result:
-            article_id = row['ID']
-            site = row['SITE']
-            url = row['URL']
-            article_info[article_id] = {'site': site, 'url': url}
-        
-        logger.info(f"Constructed article_info dictionary with {len(article_info)} entries.")
-        return article_info
-
-    except Exception as e:
-        logger.error(f"Error fetching article info from Snowflake: {e}")
-        return {}
-    """
-    Fetches site and URL information for the given summary_ids from Snowflake without using pandas.
-    
-    Parameters:
-    - summary_ids (str, set, or list): A comma-separated string, set, or list of summary IDs.
-    - session (Session): An active Snowflake session.
-    
-    Returns:
-    - dict: A dictionary mapping each SOURCE_ID to its corresponding site and URL.
-    """
-    try:
-        # Ensure summary_ids is a comma-separated string
-        if isinstance(summary_ids, (set, list)):
-            summary_ids_str = ", ".join([f"'{sid}'" for sid in summary_ids])
-        elif isinstance(summary_ids, str):
-            summary_ids_str = ", ".join([f"'{sid.strip()}'" for sid in summary_ids.split(',')])
-        else:
-            logger.error("summary_ids must be a comma-separated string, set, or list.")
-            return {}
-
-        logger.info(f"Searching for summary_ids: {summary_ids_str}")
-        
-        # Construct and execute the SQL query
-        query = f"""
-        SELECT SITE, URL, SOURCE_ID
-        FROM STOCK_NEWS
-        WHERE ID IN ({summary_ids_str})
-        """
-        
-        logger.debug(f"Executing query: {query}")
-        
-        # Execute the query and fetch results
-        result = session.sql(query).collect()
-        logger.info(f"Fetched {len(result)} rows from Snowflake.")
-        
-        # Build the dictionary
-        source_info = {}
-        for row in result:
-            source_id = row['SOURCE_ID']
-            site = row['SITE']
-            url = row['URL']
-            source_info[source_id] = {'site': site, 'url': url}
-        
-        logger.info(f"Constructed source_info dictionary with {len(source_info)} entries.")
-        return source_info
-
-    except Exception as e:
-        logger.error(f"Error fetching source info from Snowflake: {e}")
+        logger.error(f"Error fetching quote info from FMP API: {e}")
         return {}

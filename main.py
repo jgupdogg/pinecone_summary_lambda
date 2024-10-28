@@ -9,7 +9,7 @@ import asyncio
 from data_cleaning import clean_empty_arrays_and_objects
 from date_utils import generate_date_range, generate_recent_dates
 from vector_utils import is_valid_vector, create_dense_vector
-from db_utils import initialize_pinecone, get_article_info_from_snowflake, create_snowflake_session
+from db_utils import initialize_pinecone, get_article_info_from_snowflake, create_snowflake_session, get_quote_info  
 
 # Configure logging
 logger = logging.getLogger()
@@ -144,10 +144,15 @@ def lambda_handler(event, context):
             # Log the entire query_results for debugging
             logger.debug(f"Full query_results: {json.dumps(query_results, default=str)}")
             
+            # Extract all article_ids and symbols from the matches
             article_ids_set = set()
+            symbols_set = set()
             for match in query_results['matches']:
                 metadata = match.get('metadata', {})
                 article_ids_str = metadata.get('article_ids', '')
+                symbol = metadata.get('symbol')
+                if symbol:
+                    symbols_set.add(symbol)
                 if article_ids_str:
                     # Split the comma-separated string and strip whitespace
                     article_ids = [aid.strip() for aid in article_ids_str.split(',') if aid.strip()]
@@ -156,6 +161,7 @@ def lambda_handler(event, context):
                 else:
                     logger.warning("No 'article_ids' found in match metadata.")
             logger.info(f"Total unique article_ids extracted: {len(article_ids_set)}")
+            logger.info(f"Total unique symbols extracted: {symbols_set}")
 
             if not article_ids_set:
                 logger.warning("No article_ids found in any of the matches.")
@@ -164,7 +170,11 @@ def lambda_handler(event, context):
             article_info = get_article_info_from_snowflake(article_ids_set, snowflake_session) if article_ids_set else {}
             logger.info(f"Fetched article info: {article_info}")
 
-            # Convert QueryResponse to a serializable dictionary and modify 'article_ids' in metadata
+            # Fetch quote information for symbols
+            quote_info = get_quote_info(list(symbols_set)) if symbols_set else {}
+            logger.info(f"Fetched quote info: {quote_info}")
+
+            # Convert QueryResponse to a serializable dictionary and modify metadata
             serializable_results = {
                 "matches": [],
                 "namespace": query_results['namespace'],
@@ -175,6 +185,9 @@ def lambda_handler(event, context):
                 score = match['score']
                 metadata = match.get('metadata', {})
                 article_ids_str = metadata.get('article_ids', '')
+                symbol = metadata.get('symbol')
+                
+                # Process article_ids
                 if article_ids_str:
                     article_ids = [aid.strip() for aid in article_ids_str.split(',') if aid.strip()]
                     # Build a dict mapping article_id to its site and url
@@ -188,6 +201,12 @@ def lambda_handler(event, context):
                     metadata['article_ids'] = articles_data
                 else:
                     metadata['article_ids'] = {}
+
+                # Add quote data to metadata
+                if symbol and symbol in quote_info:
+                    metadata['quote'] = quote_info[symbol]
+                else:
+                    metadata['quote'] = {}
 
                 # Append the match to serializable_results
                 serializable_results['matches'].append({
