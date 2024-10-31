@@ -7,7 +7,7 @@ import requests
 
 
 logger = logging.getLogger()
-logger.setLevel(logging.DEBUG)  # Set to DEBUG for detailed logs
+logger.setLevel(logging.DEBUG) 
 handler = logging.StreamHandler()
 formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 handler.setFormatter(formatter)
@@ -68,8 +68,7 @@ def create_snowflake_session():
 
 
 
-# db_utils.py
-
+# Function to fetch article information from Snowflake
 def get_article_info_from_snowflake(article_ids, session: Session):
     """
     Fetches site and URL information for the given article_ids from Snowflake without using pandas.
@@ -125,7 +124,7 @@ def get_article_info_from_snowflake(article_ids, session: Session):
         logger.error(f"Error fetching article info from Snowflake: {e}")
         return {}
     
-
+# Gathers price information for the given list of symbols from the Financial Modeling Prep API
 def get_quote_info(symbols):
     """
     Fetches quote information for the given list of symbols from the Financial Modeling Prep API.
